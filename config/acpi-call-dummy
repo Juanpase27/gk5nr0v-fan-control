@@ -1,0 +1,10 @@
+Section: misc
+Priority: optional
+Standards-Version: 3.9.6
+Package: acpi-call-dummy
+Version: 1.0
+Provides: acpi-call
+Description: Stub, EC access via ec_sys
+ Workaround for nbfc-linux on PikaOS kernels where acpi-call-dkms
+ fails to build (broken linux-headers package). nbfc-linux accesses
+ the EC via ec_sys, so the acpi-call module is not required.
