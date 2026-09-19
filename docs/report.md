@@ -1,85 +1,108 @@
 # Reporte de estado — control de ventiladores EVOO EG-LP7 (GK5NR0V)
 
-Fecha: 2026-09-15 · Estado: **PARCIALMENTE RESUELTO — sigue sin solucionarse del todo**
+Fecha: 2026-09-15 (PikaOS) · **Actualizado 2026-09-19 (CachyOS): RESUELTO
+para el fan CPU** · El fan GPU resultó no ser controlable por EC (ver abajo).
+
+## TL;DR
+
+- **Fan CPU: control completo** vía EC `0x3E` (duty 0–100%). El firmware
+  reescribe el registro cada ~0.2–0.6 s con su propia curva, así que hay que
+  reescribirlo a ≥10 Hz. La config NBFC propia `EVOO EG-LP7 (TongFang GK5NR0V)`
+  con `EcPollInterval=100` gana esa pelea y queda instalada como servicio.
+- **Fan GPU: no hay registro de duty en el EC** — lo gobierna el controlador
+  de la propia dGPU (fan-stop hasta ~55 °C de núcleo). El EC solo refleja su
+  tacómetro. Manejo térmico GPU = `nvidia-smi -pl`.
+- `0x4B` NO es un gate de modo manual (probado). Tacómetro CPU real:
+  `0x60–0x61` BE16. `0x49` NO es la temperatura del núcleo dGPU.
 
 ## Contexto
 
 El equipo (EVOO EG-LP7, barebone TongFang GK5NR0V, Ryzen 7 4800H + RTX 2060
-Mobile) vino con Windows y el software OEM de gestión (Tongfang Control
-Center) ya no está disponible. Objetivo: recuperar control de ventiladores
-(lectura RPM + curvas) en Linux (PikaOS 4).
+Mobile) vino con Windows y el software OEM (Tongfang Control Center) ya no
+está disponible. Objetivo: recuperar control de ventiladores (lectura RPM +
+curvas) en Linux. El chasis no expone `fan*`/`pwm*` en hwmon: todo va por EC.
 
-El chasis no expone ningún `fan*`/`pwm*` en hwmon: el control es exclusivamente
-vía Embedded Controller (EC), igual que hacía el software OEM.
+## Log de experimentos 2026-09-19 (CachyOS, kernel 7.2.6)
 
-## Lo conseguido hasta ahora
+Todo el material bruto está en `data/tests/` (ver README allí).
 
-1. **Acceso al EC operativo y persistente**: `ec_sys` con `write_support=1`
-   (`/etc/modules-load.d/ec_sys.conf` + `/etc/modprobe.d/ec_sys.conf`).
-2. **Mapa EC parcial** (ver `docs/ec-register-map.md`): temperaturas GPU/CPU
-   identificadas, RPM del fan de GPU confirmado (BE16 en `0x68-0x69`,
-   escalera 2178→2996 RPM durante juego), candidatos de RPM de CPU.
-3. **nbfc-linux 0.5.3 instalado y corriendo** con la config
-   `MECHREVO Jiaolong Series GK5NR0O` (mismo barebone, variante -O):
-   - Lee temperatura real (coincide con rangos observados).
-   - Auto-control activo: escribe en el registro 62 decimal (`0x3E`),
-     duty 31–78, rampeando un paso cada `EcPollInterval` (3 s).
-   - Salida de `nbfc status -a`: Temperature 62–67 °C, Current Fan Speed
-     siguiendo target (50%→63.83%→…), Critical Mode a 88 °C como red de
-     seguridad.
-4. **Workaround del bug de headers de PikaOS** (paquete
-   `linux-headers-7.2.4-pikaos` incompleto) documentado en
-   `docs/pikaos-headers-bug.md`: stub `acpi-call-dummy` vía equivs.
+1. **Test sostenido nbfc@3 s** (`fan_test_*.csv`): con la config MECHREVO
+   (poll 3 s), `nbfc set -s 100` sostenido 120 s no sostiene el duty:
+   `0x3E` fluctuó 55–80 y la correlación duty↔RPM fue 0.108. Pero `0x3E`
+   correlaciona +0.78 con k10temp → es el registro que alimenta el firmware,
+   que llega hasta 96–98 bajo carga. Escenario A (la config tal cual funciona)
+   descartado; escenario B (write inefectivo) también: ver 2.
+2. **Latencia de reversión** (`write_latency_*.csv`, nbfc parado): escribir
+   `0x3E=31` directo → el fan CPU cayó 848→316 RPM en 0.4 s; el firmware lo
+   revirtió en <0.6 s (31→46→53→57…). Escribir `0x3E=78` → 2178 RPM
+   inmediato, decayendo al revertir. **Control físico confirmado.**
+3. **Hammer POC** (`hammer_*.csv`): reescribir `0x3E=78` cada 100 ms durante
+   20 s → duty clavado en 78, tach estable en 2178 RPM; al soltar, el
+   firmware caminó 78→48 y el fan bajó a 316 RPM. **10 Hz gana la pelea.**
+4. **Gate de modo** (`modeflag_*.csv`): con `0x4B=1` escrito, el firmware
+   siguió revirtiendo `0x3E=40` igual → `0x4B` no es el interruptor de modo
+   manual (parece flag de estado/perfil: 0 escritorio, 01/02 en juego).
+5. **Sondeo GPU duty** (`gpu_duty_probe_*.csv`): `0x3F` martillado a 78
+   15 s → el fan GPU ni se movió y el firmware ni revertió el registro
+   (parece no usado). Desviación documentada de la regla "solo valores
+   observados", sin efectos colaterales (diffs pre/post solo térmicos).
+6. **Carga dGPU observacional** (`gpu_watch_*.csv`, `ec_monitor_gpu_load*.txt`):
+   2× nvenc + scale_cuda llevaron el núcleo de 48→73 °C; el fan GPU arrancó
+   exactamente a ~55 °C y escaló hasta 2996 RPM **sin que ningún byte del EC
+   lo acompañara** (`0x3F`=0 fijo; monitor completo de 256 bytes sin candidato).
+   Veredicto: fan GPU gobernado por la dGPU, no por EC.
+7. **Config propia @100 ms** (`nbfc100ms_hold.csv`): config NBFC
+   `EVOO EG-LP7 (TongFang GK5NR0V)` (duty 25–100, curva k10temp, Critical 92 °C):
+   `nbfc set -s 70` sostuvo duty=78 en 110/120 muestras y tach=2178 RPM estable.
+   **Solución nativa confirmada** — sin daemon externo.
 
-## Lo que SIGUE SIN RESOLVERSE
+## Setup vigente en el equipo (CachyOS, reproducible)
 
-**No está confirmado que escribir en `0x3E` mueva físicamente los
-ventiladores en la variante GK5NR0V.** El usuario reporta que al mandar
-`nbfc set -f 0 -s 100` no se percibió aumento de velocidad de los fans.
-Matiz importante: NBFC rampa de a un paso cada 3 s (~72 s del 50% al 100%) y
-en la prueba se verificó a los 8 s con la rampa apenas en 63.83%, y se
-canceló pronto (30→100→auto en sucesión), por lo que la prueba fue
-**inconclusa, no negativa**.
+```bash
+# 1. EC accesible (persistente entre reinicios)
+sudo modprobe ec_sys write_support=1
+echo ec_sys | sudo tee /etc/modules-load.d/ec_sys.conf
+echo options ec_sys write_support=1 | sudo tee /etc/modprobe.d/ec_sys.conf
 
-Escenarios abiertos:
+# 2. nbfc-linux (paquete oficial para Arch; CachyOS = pacman -U)
+#    https://github.com/nbfc-linux/nbfc-linux/releases (arch-linux-*.pkg.tar.zst)
+sudo pacman -U --needed arch-linux-nbfc-linux-git-0.5.3-1-x86_64.pkg.tar.zst
 
-- **A. La config funciona y la prueba se cortó antes de tiempo.** → resolver
-  con el test sostenido (abajo).
-- **B. El registro `0x3E` cambia el byte pero el EC de la variante -V no
-  actúa sobre él** (read compatible, write inefectivo). → hay que localizar
-  el/los registros de duty reales de esta variante.
-- **C. Se necesita conmutar un modo manual/automático antes de que los
-  writes de duty tengan efecto** (el flag `0x4B` 01/02 es sospechoso;
-  comportamiento habitual en ECs de Tongfang).
+# 3. Config propia del chasis (este repo)
+sudo cp config/evoo-eg-lp7-gk5nr0v.json \
+    "/usr/share/nbfc/configs/EVOO EG-LP7 (TongFang GK5NR0V).json"
+sudo nbfc config --set "EVOO EG-LP7 (TongFang GK5NR0V)"
+sudo systemctl enable --now nbfc_service
 
-Además, la config MECHREVO define **un solo fan**; este chasis tiene dos
-(CPU/GPU). Un control fino requiere una config dual.
+# 4. Uso
+nbfc status -a
+sudo nbfc set -f 0 -s 70    # manual 70% (duty ≈ 77)
+sudo nbfc set -a            # volver a la curva automática
+```
 
-## Próximos pasos accionables
-
-1. **Test sostenido** (define entre A y B/C):
-   ```bash
-   sudo ./scripts/ec-watch.sh          # terminal 1: vigilar 0x3E y RPM
-   sudo nbfc set -f 0 -s 100           # terminal 2
-   # esperar 2 minutos completos; registrar: 0x3E sube a ~78 (0x4E)?
-   # RPM (0x65 / 0x68-69) suben? ¿ruido audible? ¿temp se mantiene?
-   sudo nbfc set -a                    # volver a automático
-   ```
-2. Si B/C: experimentación controlada de writes en candidatos (`0x64`,
-   `0x6C`, `0x4B`) con valores dentro de rangos ya observados, documentando
-   cada intento, o buscar registros documentados por la comunidad TongFang
-   (r/EVOOGaming, plataforma compartida con Maingear Vector 15).
-3. Redactar config NBFC propia para `EVOO EG-LP7` (dual fan) y contribuir al
-   repo de configs de nbfc-linux.
-4. Reportar el bug de headers de PikaOS upstream (ver
-   `docs/pikaos-headers-bug.md`).
-5. Correlacionar `0x4C` con `k10temp` y `0x49` con `nvidia-smi` para validar
-   el mapa térmico.
+La clave frente a la config MECHREVO heredada: `EcPollInterval: 100` (vs 3000)
+y rango 25–100 (vs 31–78). El poll de 3 s perdía siempre contra el firmware.
 
 ## Riesgos y salvaguardas
 
 - Escribir registros EC desconocidos puede afectar teclado/batería/gestión
-  térmica. Regla del proyecto: solo escribir valores dentro de rangos ya
-  observados del firmware, un registro a la vez, con dump previo y posterior.
-- NBFC mantiene Critical Mode (100% forzado a 88 °C) incluso en control
-  manual: red de seguridad térmica activa.
+  térmica. Regla del proyecto: solo valores dentro de rangos ya observados,
+  un registro a la vez, con dump previo y posterior. La única desviación
+  documentada: el sondeo `0x3F=78` (experimento 5), sin efectos.
+- NBFC mantiene Critical Mode (100% forzado a 92 °C) incluso en manual.
+- Reescribir `0x3E` a 10 Hz es lo que hacía de facto el software OEM; sin
+  evidencia de desgaste, pero se documenta el mecanismo.
+
+## Pendiente (roadmap)
+
+- [x] Confirmar efecto físico de `0x3E` (hecho: control completo CPU).
+- [x] Tacómetro CPU fiable (`0x60-61` BE16).
+- [x] Localizar duty GPU → no existe en el EC (dGPU-driven).
+- [x] Config NBFC propia para el EG-LP7 funcionando.
+- [ ] Contribuir la config upstream al repo de configs de nbfc-linux.
+- [ ] Curva afinada con uso real (los umbrales actuales son un primer
+      borrador conservador; k10temp idle de este equipo es alto, 60–75 °C).
+- [x] ~~Reportar bug de headers de PikaOS~~ (obsoleto: el proyecto migró a
+      CachyOS, donde las dependencias están en repos y no hubo que compilar).
+- [x] Correlación térmica: `0x4C`↔k10temp (+0.705, offset ~15–20 °C);
+      dGPU core = solo nvidia-smi (`0x49` no es el núcleo).

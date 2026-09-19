@@ -1,30 +1,38 @@
 # EC register map — TongFang GK5NR0V (EVOO EG-LP7)
 
-Reverse-engineered by observation (idle / stress-ng / gaming dumps, 2026-09-15).
-Access via `ec_sys` (`/sys/kernel/debug/ec/ec0/io`, 256 bytes).
-See `data/README.md` for capture conditions.
+Reverse-engineered by observation and controlled experiments
+(2026-09-15 first pass on PikaOS; 2026-09-19 revision on CachyOS — see
+`docs/report.md` for the experiment log and `data/tests/` for raw captures).
+Access via `ec_sys` (`/sys/kernel/debug/ec/ec0/io`) or `ec_probe`.
 
-## Confirmed / high confidence
+## Confirmed / high confidence (2026-09-19 revision)
 
 | Offset | Function | Evidence |
 |---|---|---|
-| `0x49` | GPU temperature (°C) | ~30 idle → 95 peak during game, 22 after closing it |
-| `0x4C` | CPU temperature (°C) | follows thermal curve under load (60 → 110+ readings include EC read-race artifacts; correlate with `k10temp` before trusting absolute values) |
-| `0x68`–`0x69` | GPU fan RPM, 16-bit big-endian | perfect arithmetic staircase during game: 0x0882=2178 → 0x098C=2444 → 0x0AA0=2720 → 0x0BB4=2996 RPM; zero at idle (fan-stop) |
-| `0x4B` | Firmware fan mode flag | toggles 01/02 between samples |
+| `0x3E` | **CPU fan duty, 0–100%** | Firmware writes its own curve here (observed 45–98). External writes take physical effect in < 0.4 s; firmware reverts them within 0.2–0.6 s. Sustained control requires rewriting at ≥ 10 Hz (nbfc `EcPollInterval=100` confirmed working) |
+| `0x60`–`0x61` | **CPU fan RPM, 16-bit big-endian** | Constant 3272 RPM through a whole gaming session; in duty tests it tracked writes as a clean 266-RPM-step staircase, 316–3272 RPM |
+| `0x68`–`0x69` | GPU fan RPM, 16-bit big-endian | Staircase 2178→2996 during game; 0 at idle (fan-stop); started exactly when dGPU core hit ~55 °C |
+| `0x4C` | CPU-ish temperature | Correlates 0.705 with `k10temp` but reads lower (~15–20 °C offset); use `k10temp` for absolute values |
+| `0x4B` | Performance/thermal state flag | 0 at desktop, 01/02 during gaming. **Not** a manual-mode gate: with `0x4B=1` written, firmware still reverted `0x3E` (modeflag test) |
 
-## Candidates (moved with load, encoding not fully confirmed)
+## GPU fan: no EC duty register exists
 
-| Offset | Candidate function | Observed values |
+Under sustained dGPU load (2× nvenc + scale_cuda, core 48→73 °C), the GPU fan
+spun 0→2996 RPM tracking the **dGPU core temperature** (nvidia-smi), while no
+byte in the EC moved with it: `0x3F` stayed 0, `0x3E` was busy with the CPU,
+and a full-register `ec_probe monitor` capture during load showed no candidate.
+Conclusion: the GPU fan is driven by the dGPU's own controller (NVIDIA
+fan-stop below ~55 °C core). The EC only mirrors its tachometer (`0x68–0x69`).
+Thermal management for the GPU side = `nvidia-smi -pl` power capping.
+
+## Demoted / corrected (earlier hypotheses that failed)
+
+| Offset | Previous guess | Verdict |
 |---|---|---|
-| `0x65` | CPU/system fan RPM (~value × 10) | tachometer-like jitter: 148–195 (≈1480–1950 RPM) |
-| `0x6D` | Second fan RPM (~value × 10) | jitter 138–181 |
-| `0x64`, `0x6C` | Fan duty or secondary thermal sensor | static 19–22 regardless of fan ramp — not the duty register |
-| `0x3E` | NBFC write register (from MECHREVO GK5NR0O config: decimal 62, duty 31–78) | NBFC reads/writes it; physical effect on fans still unverified on the -V variant |
-
-## Notes
-
-- Registers `0x0C`/`0x0E` (LE16 0x0226 = 550) were initially suspected as RPM but never moved; likely unrelated (battery/power).
-- Fan control on this chassis is EC-mediated (no `hwmon` fan/pwm exposed).
-- The OEM Windows software was the Tongfang "Control Center"; it drove the same EC.
-- Next step to finish the map: sustained `nbfc set -f 0 -s 100` for ~2 min while watching whether `0x3E` changes correlate with RPM (`0x65`, `0x68-69`) and audible fan speed.
+| `0x65`, `0x6D` | CPU/2nd fan RPM (×10) | **Not tachs.** CPU tach at `0x60-61` sat rock-stable at 3272 RPM while these two jittered ±100 between samples — EC read-race artifacts |
+| `0x49` | GPU temperature | **Not dGPU core temp**: read 6–25 °C while nvidia-smi reported 40–73 °C core. Some other GPU-side sensor (cold rail). Gaming readings 61–95 were coincidentally plausible; use nvidia-smi |
+| `0x64`, `0x6C` | Fan duty candidates | Small temperature-ish values (10–22), never tracked duty |
+| `0x3F` | GPU fan duty candidate | Hammered to 78 for 15 s: no fan movement, no firmware revert — register appears unused |
+| `0xAD`, `0xAE` | (suspected temp during probing) | Seconds and minutes counters (`0xAD` wraps 59→0). Not temperatures |
+| `0x34`–`0x35` | — | Slowly-decreasing 16-bit value (1003→612 across a fan ramp-down); battery-current-like, unknown |
+| `0x0C`/`0x0E` | RPM (initial) | Unrelated (battery/power), never moved — unchanged verdict |
