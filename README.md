@@ -72,6 +72,9 @@ dependencias están en repos y no hubo que compilar nada.
 - `scripts/ec-watch.sh` — monitor en vivo de las filas EC relevantes.
 - `scripts/ec-fan-driver.py` — driver Python nativo kernel 7 (`io`): watch /
   latency / hold / sweep / curva con histéresis y suavizado térmico.
+- `module/` — **gk5nr0v-fans**: módulo kernel DKMS de solo lectura que expone
+  los tacómetros (0x60/0x68) como hwmon estándar → `sensors`, CoolerControl,
+  fan2go y widgets los muestran sin adaptar nada. Convive con nbfc.
 - `scripts/ec-dump.sh` — captura de dump EC con timestamp.
 - `scripts/ec-diff.py` — diff byte a byte entre dos dumps.
 - `scripts/fan-test.sh` — test sostenido con logging CSV (fases auto/manual/auto).
