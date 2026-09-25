@@ -1,0 +1,12 @@
+{
+  "id": "gk5nr0v-fans",
+  "name": "GK5NR0V Fan Monitor",
+  "description": "Compact overlay with CPU/GPU fan RPMs (gk5nr0v-fans hwmon module), k10temp CPU temp and dGPU core temp. Part of the gk5nr0v-fan-control project.",
+  "type": "quickshell",
+  "author": {
+    "name": "Juanpase27",
+    "url": "https://github.com/Juanpase27"
+  },
+  "icon": "speed",
+  "restart": false
+}

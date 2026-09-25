@@ -75,6 +75,8 @@ dependencias están en repos y no hubo que compilar nada.
 - `module/` — **gk5nr0v-fans**: módulo kernel DKMS de solo lectura que expone
   los tacómetros (0x60/0x68) como hwmon estándar → `sensors`, CoolerControl,
   fan2go y widgets los muestran sin adaptar nada. Convive con nbfc.
+- `widget/caelestia-plugin/` — **plugin quickshell para Caelestia**: overlay
+  con RPMs CPU/GPU + temps en vivo (`~/.config/caelestia/plugins/`).
 - `scripts/ec-dump.sh` — captura de dump EC con timestamp.
 - `scripts/ec-diff.py` — diff byte a byte entre dos dumps.
 - `scripts/fan-test.sh` — test sostenido con logging CSV (fases auto/manual/auto).
