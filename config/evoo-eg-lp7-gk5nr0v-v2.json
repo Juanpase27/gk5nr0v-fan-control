@@ -1,0 +1,55 @@
+{
+ "LegacyTemperatureThresholdsBehaviour": true,
+ "NotebookModel": "EVOO EG-LP7 (TongFang GK5NR0V)",
+ "Author": "Juan (gk5nr0v-fan-control; v2 curve from 2026-09-25 duty-RPM characterization)",
+ "EcPollInterval": 50,
+ "ReadWriteWords": false,
+ "CriticalTemperature": 97,
+ "FanConfigurations": [
+  {
+   "ReadRegister": 62,
+   "WriteRegister": 62,
+   "MinSpeedValue": 50,
+   "MaxSpeedValue": 100,
+   "IndependentReadMinMaxValues": false,
+   "MinSpeedValueRead": 0,
+   "MaxSpeedValueRead": 0,
+   "ResetRequired": false,
+   "FanSpeedResetValue": 0,
+   "FanDisplayName": "CPU fan (0x3E duty, tach 0x60-0x61)",
+   "TemperatureThresholds": [
+    {
+     "UpThreshold": 60,
+     "DownThreshold": 0,
+     "FanSpeed": 0.0
+    },
+    {
+     "UpThreshold": 68,
+     "DownThreshold": 63,
+     "FanSpeed": 20.0
+    },
+    {
+     "UpThreshold": 75,
+     "DownThreshold": 71,
+     "FanSpeed": 40.0
+    },
+    {
+     "UpThreshold": 82,
+     "DownThreshold": 78,
+     "FanSpeed": 60.0
+    },
+    {
+     "UpThreshold": 88,
+     "DownThreshold": 84,
+     "FanSpeed": 85.0
+    },
+    {
+     "UpThreshold": 95,
+     "DownThreshold": 90,
+     "FanSpeed": 100.0
+    }
+   ]
+  }
+ ],
+ "RegisterWriteConfigurations": []
+}
