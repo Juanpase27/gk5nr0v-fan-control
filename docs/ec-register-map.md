@@ -1,19 +1,28 @@
 # EC register map — TongFang GK5NR0V (EVOO EG-LP7)
 
 Reverse-engineered by observation and controlled experiments
-(2026-09-15 first pass on PikaOS; 2026-09-19 revision on CachyOS — see
-`docs/report.md` for the experiment log and `data/tests/` for raw captures).
+(2026-09-15 first pass on PikaOS; 2026-09-19 revision on CachyOS; see
+`docs/report.md` for the experiment log and `data/tests/` for raw captures.
+Re-validated on kernel 7.2.7 on 2026-09-25 — see `docs/kernel7-session-20260925.md`.)
 Access via `ec_sys` (`/sys/kernel/debug/ec/ec0/io`) or `ec_probe`.
 
 ## Confirmed / high confidence (2026-09-19 revision)
 
 | Offset | Function | Evidence |
 |---|---|---|
-| `0x3E` | **CPU fan duty, 0–100%** | Firmware writes its own curve here (observed 45–98). External writes take physical effect in < 0.4 s; firmware reverts them within 0.2–0.6 s. Sustained control requires rewriting at ≥ 10 Hz (nbfc `EcPollInterval=100` confirmed working) |
-| `0x60`–`0x61` | **CPU fan RPM, 16-bit big-endian** | Constant 3272 RPM through a whole gaming session; in duty tests it tracked writes as a clean 266-RPM-step staircase, 316–3272 RPM |
+| `0x3E` | **CPU fan duty, 0–100%** | Firmware writes its own curve here (observed 45–98). External writes take physical effect in < 0.4 s; firmware reverts them within 0.2–0.6 s (re-measured 2026-09-25: 125–419 ms idle, 313–397 ms at load temps). Sustained control requires rewriting at ≥ 10 Hz (nbfc `EcPollInterval=100` → 90% dwell; `=50` → 96% dwell, phase-independent 20 Hz sampling) |
+| `0x60`–`0x61` | **CPU fan RPM, 16-bit big-endian** | Constant 3272 RPM through a whole gaming session; in duty tests it tracked writes as a clean 266-RPM-step staircase, 316–3272 RPM. Full staircase observed: 316, 572, 848, 1114, 1380, 1646, 1912, 2178, 2444, 2720, 2996, 3272 |
 | `0x68`–`0x69` | GPU fan RPM, 16-bit big-endian | Staircase 2178→2996 during game; 0 at idle (fan-stop); started exactly when dGPU core hit ~55 °C |
 | `0x4C` | CPU-ish temperature | Correlates 0.705 with `k10temp` but reads lower (~15–20 °C offset); use `k10temp` for absolute values |
 | `0x4B` | Performance/thermal state flag | 0 at desktop, 01/02 during gaming. **Not** a manual-mode gate: with `0x4B=1` written, firmware still reverted `0x3E` (modeflag test) |
+
+## Fan duty response curve (2026-09-25 sweep)
+
+Duty values below ~45 are a **dead zone**: the fan stalls/sputters at
+0–316 RPM (sputter is acoustically worse than steady 572). Minimum
+stable duty = 50. See `docs/kernel7-session-20260925.md` for the full
+table and the k10temp single-sample Tctl spike warning (78→98 °C in
+200 ms under background bursts — smooth before feeding a curve).
 
 ## GPU fan: no EC duty register exists
 

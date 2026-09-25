@@ -6,11 +6,13 @@ software OEM de Windows (Tongfang Control Center). Documenta la ingeniería
 inversa del Embedded Controller (EC), el mapa de registros y el camino con
 nbfc-linux.
 
-> **Estado: RESUELTO para el fan CPU (2026-09-19).** Control completo vía
-> config NBFC propia (`EcPollInterval=100`). El fan GPU resultó **no tener
-> registro de duty en el EC** — lo gobierna la propia dGPU (fan-stop hasta
-> ~55 °C de núcleo); el EC solo refleja su tacómetro. Detalle completo en
-> [`docs/report.md`](docs/report.md).
+> **Estado: RESUELTO para el fan CPU (2026-09-19; re-validado en kernel
+> 7.2.7 el 2026-09-25).** Control completo vía config NBFC propia (v2:
+> `EcPollInterval=50`, curva fuera de la zona muerta del fan). El fan GPU
+> resultó **no tener registro de duty en el EC** — lo gobierna la propia
+> dGPU (fan-stop hasta ~55 °C de núcleo); el EC solo refleja su tacómetro.
+> Detalle completo en [`docs/report.md`](docs/report.md) y la sesión
+> kernel 7 en [`docs/kernel7-session-20260925.md`](docs/kernel7-session-20260925.md).
 
 ## Mapa EC (resumen)
 
@@ -40,21 +42,26 @@ echo options ec_sys write_support=1 | sudo tee /etc/modprobe.d/ec_sys.conf
 sudo pacman -U --needed arch-linux-nbfc-linux-git-0.5.3-1-x86_64.pkg.tar.zst
 
 # 3. Config propia del chasis (ESTE repo) y servicio
-sudo cp config/evoo-eg-lp7-gk5nr0v.json \
+#    v2 = curva fuera de la zona muerta (<50 = fan parado) y EcPollInterval=50
+sudo cp config/evoo-eg-lp7-gk5nr0v-v2.json \
     "/usr/share/nbfc/configs/EVOO EG-LP7 (TongFang GK5NR0V).json"
 sudo nbfc config --set "EVOO EG-LP7 (TongFang GK5NR0V)"
 sudo systemctl enable --now nbfc_service
 
 # 4. Estado / control
 nbfc status -a
-sudo nbfc set -f 0 -s 70   # manual 70% (duty ≈ 77)
-sudo nbfc set -a           # volver a automático
+#    OJO (nbfc 0.5.3): el modo manual `nbfc set -s` escribe UNA sola vez y
+#    el firmware lo revierte en <0.5 s — para velocidad fija sostenida usa:
+#    sudo scripts/ec-fan-driver.py hold <duty> <secs>
+#    Tras cualquier comando manual, reinicia el servicio (bug de estado):
+#    sudo systemctl restart nbfc_service
 ```
 
 La clave de la config propia frente a la heredada (MECHREVO GK5NR0O):
-`EcPollInterval: 100` en vez de 3000 — con 3 s el firmware siempre gana; con
-100 ms nbfc sostiene el duty (verificado: duty=78 en 110/120 muestras con
-tach estable, `data/tests/nbfc100ms_hold.csv`).
+`EcPollInterval` por debajo del lazo del firmware — con 3 s el firmware
+siempre gana; con 100 ms nbfc sostiene el duty ~90% del tiempo y con 50 ms
+~96% (verificado 2026-09-25 con muestreo independiente a 20 Hz; el fan es
+estable con cualquiera de los dos). La v1 usaba 100 ms; la v2, 50 ms.
 
 Nota PikaOS (histórico): en PikaOS 4 la dependencia `acpi_call` no compilaba
 (headers rotos); workaround en `docs/pikaos-headers-bug.md`. En CachyOS las
@@ -63,6 +70,8 @@ dependencias están en repos y no hubo que compilar nada.
 ## Herramientas del repo
 
 - `scripts/ec-watch.sh` — monitor en vivo de las filas EC relevantes.
+- `scripts/ec-fan-driver.py` — driver Python nativo kernel 7 (`io`): watch /
+  latency / hold / sweep / curva con histéresis y suavizado térmico.
 - `scripts/ec-dump.sh` — captura de dump EC con timestamp.
 - `scripts/ec-diff.py` — diff byte a byte entre dos dumps.
 - `scripts/fan-test.sh` — test sostenido con logging CSV (fases auto/manual/auto).
